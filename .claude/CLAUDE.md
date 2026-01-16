@@ -4,6 +4,10 @@ Scrut is a CLI testing toolkit for terminal programs, inspired by Cram. It valid
 
 This is Christopher Boone's fork <https://github.com/cboone/scrut> of the primary repo <https://github.com/facebookincubator/scrut>.
 
+## Commit messages
+
+While working in this repo, follow the upstream repo's commit message conventions, **not my usual Conventional Commits style**. That means short messages, just one line with the overall summary of what was done; beginning with an uppercase letter; no category indicator at the beginning; just an imperative verb and then the rest. For example: `Add completions using clap_complete`.
+
 ## Project Structure
 
 - `src/lib.rs` - Library entry point with public modules

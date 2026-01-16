@@ -85,32 +85,62 @@ scrut v0.X.Y
 
 ## Shell Completions
 
-Scrut can generate shell completions for Bash, Zsh, Fish, PowerShell, and Elvish. Set the `_SCRUT_COMPLETE` environment variable to generate a completion script:
-
-```bash title="Bash"
-$ _SCRUT_COMPLETE=bash_source scrut > /usr/local/etc/bash_completion.d/scrut
-```
-
-```zsh title="Zsh"
-$ _SCRUT_COMPLETE=zsh_source scrut > /usr/local/share/zsh/site-functions/_scrut
-```
-
-```fish title="Fish"
-$ _SCRUT_COMPLETE=fish_source scrut > /etc/fish/completions/scrut.fish
-```
-
-```powershell title="PowerShell"
-# Add to your PowerShell profile (run `echo $PROFILE` to find it)
-$env:_SCRUT_COMPLETE = "powershell_source"; scrut | Out-String | Invoke-Expression
-```
-
-```elvish title="Elvish"
-# Add to ~/.config/elvish/rc.elv
-eval (E:_SCRUT_COMPLETE=elvish_source scrut | slurp)
-```
-
-Valid values for `_SCRUT_COMPLETE` are: `bash_source`, `elvish_source`, `fish_source`, `powershell_source`, `zsh_source`.
+Scrut can generate shell completion scripts for tab-completion of commands and options.
 
 :::note
 If you installed via Homebrew, completions are already installed automatically.
 :::
+
+Generate and install completions for your shell using the `completions` subcommand:
+
+### Bash
+
+```bash title="Terminal"
+$ scrut completions bash > ~/.local/share/bash-completion/completions/scrut
+```
+
+Or, if using an older setup:
+
+```bash title="Terminal"
+$ scrut completions bash > ~/.bash_completion.d/scrut
+```
+
+### Zsh
+
+```bash title="Terminal"
+$ scrut completions zsh > ~/.zfunc/_scrut
+```
+
+Then ensure your `~/.zshrc` includes:
+
+```bash
+fpath=(~/.zfunc $fpath)
+autoload -Uz compinit && compinit
+```
+
+### Fish
+
+```bash title="Terminal"
+$ scrut completions fish > ~/.config/fish/completions/scrut.fish
+```
+
+### PowerShell
+
+```powershell title="PowerShell"
+$ scrut completions powershell > scrut.ps1
+$ . ./scrut.ps1
+```
+
+To load completions automatically, add the above to your PowerShell profile.
+
+### Elvish
+
+```elvish title="Elvish"
+$ scrut completions elvish > ~/.config/elvish/lib/scrut.elv
+```
+
+Then add to your `~/.config/elvish/rc.elv`:
+
+```elvish
+use scrut
+```

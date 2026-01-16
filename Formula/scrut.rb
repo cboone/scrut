@@ -1,35 +1,16 @@
 class Scrut < Formula
   desc "Simple and powerful test framework for CLI applications"
   homepage "https://facebookincubator.github.io/scrut/"
+  url "https://github.com/cboone/scrut.git",
+      branch: "main",
+      revision: "21a492d06ab5fc59d1b25e2f1a19b5e00ffc8ea6"
   version "0.4.2"
   license "MIT"
 
-  on_macos do
-    if Hardware::CPU.arm?
-      url "https://github.com/facebookincubator/scrut/releases/download/v#{version}/scrut-v#{version}-macos-aarch64.tar.gz"
-      sha256 "b05bf41457af26c7ed9e0dd6434c876e84b2904539dc7c2ffd9c8527fd4883c1"
-    end
-
-    if Hardware::CPU.intel?
-      url "https://github.com/facebookincubator/scrut/releases/download/v#{version}/scrut-v#{version}-macos-x86_64.tar.gz"
-      sha256 "652ee38e11a6e9da7e035d5d95b796c05e338214186a8587b73440ef467dbdcf"
-    end
-  end
-
-  on_linux do
-    if Hardware::CPU.arm?
-      url "https://github.com/facebookincubator/scrut/releases/download/v#{version}/scrut-v#{version}-linux-aarch64.tar.gz"
-      sha256 "5373cc51f85f9b24847a74412b66c4524e987c5b295799b3a98661e7a9f1e944"
-    end
-
-    if Hardware::CPU.intel?
-      url "https://github.com/facebookincubator/scrut/releases/download/v#{version}/scrut-v#{version}-linux-x86_64.tar.gz"
-      sha256 "894b12768b5886b8ad244fd6fad19f334c820f296d9f96befacdff32b90b1e6b"
-    end
-  end
+  depends_on "rust" => :build
 
   def install
-    bin.install "scrut"
+    system "cargo", "install", *std_cargo_args
     generate_completions_from_executable(bin/"scrut", "completions")
   end
 

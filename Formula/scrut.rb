@@ -30,11 +30,7 @@ class Scrut < Formula
 
   def install
     bin.install "scrut"
-
-    generate_completions_from_executable(bin/"scrut", shells: [:bash, :fish, :pwsh, :zsh]) do |shell|
-      env_value = { bash: "bash_source", fish: "fish_source", pwsh: "powershell_source", zsh: "zsh_source" }.fetch(shell)
-      Utils.safe_popen_read({ "_SCRUT_COMPLETE" => env_value }, bin/"scrut")
-    end
+    generate_completions_from_executable(bin/"scrut", "completions")
   end
 
   test do

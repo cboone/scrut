@@ -39,6 +39,18 @@ pub struct DocumentConfig {
     #[serde(skip_serializing_if = "<[_]>::is_empty")]
     pub append: Vec<PathBuf>,
 
+    /// When true, test names are composed from all ancestor headings, not just
+    /// the immediate heading above the test. This enables BDD-style test organization
+    /// where nested headings form hierarchical test names.
+    /// For example: "Feature > Scenario > Test case"
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub composite_test_names: Option<bool>,
+
+    /// The separator used to join heading levels when composite_test_names is enabled.
+    /// Defaults to " > " if not specified.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub composite_test_name_separator: Option<String>,
+
     /// Defaults for per-test configurations
     #[serde(skip_serializing_if = "TestCaseConfig::is_empty")]
     pub defaults: TestCaseConfig,
@@ -99,6 +111,8 @@ impl DocumentConfig {
             && self.prepend.is_empty()
             && self.append.is_empty()
             && self.defaults.is_empty()
+            && self.composite_test_names.is_none()
+            && self.composite_test_name_separator.is_none()
     }
 
     /// Returns a new instance that fills in unset values from the provided defaults.
@@ -114,6 +128,11 @@ impl DocumentConfig {
 
         Self {
             append,
+            composite_test_names: self.composite_test_names.or(defaults.composite_test_names),
+            composite_test_name_separator: self
+                .composite_test_name_separator
+                .clone()
+                .or_else(|| defaults.composite_test_name_separator.clone()),
             prepend,
             defaults: self.defaults.with_defaults_from(&defaults.defaults),
             shell: self.shell.clone().or_else(|| defaults.shell.clone()),
@@ -125,6 +144,18 @@ impl DocumentConfig {
     /// Values for `append` and `prepend` are extended, not overwritten.
     pub fn with_overrides_from(&self, overrides: &Self) -> Self {
         overrides.with_defaults_from(self)
+    }
+
+    /// Returns true if composite test names are enabled
+    pub fn use_composite_test_names(&self) -> bool {
+        self.composite_test_names.unwrap_or(false)
+    }
+
+    /// Returns the separator for composite test names, defaulting to " > "
+    pub fn get_composite_test_name_separator(&self) -> &str {
+        self.composite_test_name_separator
+            .as_deref()
+            .unwrap_or(" > ")
     }
 }
 
@@ -600,6 +631,8 @@ total_timeout: 5m 3s
                 total_timeout: Some(Duration::from_secs(5 * 60 + 3)),
                 prepend: vec!["prep1".into(), "prep2".into()],
                 append: vec!["app1".into(), "app2".into()],
+                composite_test_names: None,
+                composite_test_name_separator: None,
                 defaults: TestCaseConfig {
                     output_stream: Some(OutputStreamControl::Stdout),
                     keep_crlf: Some(true),
@@ -631,6 +664,8 @@ total_timeout: 5m 3s
             total_timeout: Some(Duration::from_secs(5 * 60 + 3)),
             prepend: vec!["prep1".into(), "prep2".into()],
             append: vec!["app1".into(), "app2".into()],
+            composite_test_names: None,
+            composite_test_name_separator: None,
             defaults: TestCaseConfig {
                 output_stream: Some(OutputStreamControl::Stdout),
                 keep_crlf: Some(true),

@@ -70,6 +70,88 @@ impl MarkdownParser {
     }
 }
 
+/// Maximum heading level supported (h1 through h6)
+const MAX_HEADING_LEVEL: usize = 6;
+
+/// Tracks heading hierarchy for building composite test names
+#[derive(Debug, Default)]
+struct HeadingStack {
+    /// Headings at each level (index 0 = h1, index 5 = h6)
+    headings: [Option<String>; MAX_HEADING_LEVEL],
+    /// Paragraph text that follows the innermost heading (level 0 in extract_title)
+    paragraph: Vec<String>,
+}
+
+impl HeadingStack {
+    /// Updates the heading at the given level (1-6) and clears all deeper levels
+    fn set_heading(&mut self, level: usize, title: String) {
+        if level == 0 || level > MAX_HEADING_LEVEL {
+            return;
+        }
+        let index = level - 1;
+        self.headings[index] = Some(title);
+        // Clear all deeper headings
+        for h in self.headings.iter_mut().skip(index + 1) {
+            *h = None;
+        }
+        // Clear paragraph when a new heading is set
+        self.paragraph.clear();
+    }
+
+    /// Adds a paragraph line (non-header title text)
+    fn add_paragraph(&mut self, text: String) {
+        self.paragraph.push(text);
+    }
+
+    /// Clears only the paragraph (called when a non-title line is encountered)
+    fn clear_paragraph(&mut self) {
+        self.paragraph.clear();
+    }
+
+    /// Clears the paragraph after a test block is processed
+    fn clear_after_test(&mut self) {
+        self.paragraph.clear();
+    }
+
+    /// Builds the test title based on configuration.
+    /// If composite naming is enabled, joins all heading levels with the separator.
+    /// Otherwise, returns only the innermost title (paragraph if present, else deepest heading).
+    fn build_title(&self, use_composite: bool, separator: &str) -> String {
+        if use_composite {
+            let parts: Vec<&str> = self
+                .headings
+                .iter()
+                .filter_map(|h| h.as_deref())
+                .collect();
+
+            if !self.paragraph.is_empty() {
+                // Join paragraph lines with newline for multi-line paragraphs
+                let paragraph_text = self.paragraph.join("\n");
+                if parts.is_empty() {
+                    return paragraph_text;
+                }
+                // For composite, append paragraph to the heading chain
+                let headings_part = parts.join(separator);
+                return format!("{}{}{}", headings_part, separator, paragraph_text);
+            }
+
+            parts.join(separator)
+        } else {
+            // Original behavior: use paragraph if present, else deepest heading
+            if !self.paragraph.is_empty() {
+                return self.paragraph.join("\n");
+            }
+            // Find deepest (innermost) heading
+            self.headings
+                .iter()
+                .rev()
+                .find_map(|h| h.clone())
+                .unwrap_or_default()
+        }
+    }
+
+}
+
 impl Parser for MarkdownParser {
     /// See [`super::parser::Parser::parse`]
     fn parse(&self, text: &str) -> Result<(DocumentConfig, Vec<TestCase>)> {
@@ -81,8 +163,10 @@ impl Parser for MarkdownParser {
         let languages: &[&str] = &self.languages.iter().map(|s| s as &str).collect::<Vec<_>>();
         let iterator = MarkdownIterator::new(languages, text.lines());
         let mut line_parser = LineParser::new(self.expectation_maker.clone(), false);
-        let mut title_paragraph = vec![];
+        let mut heading_stack = HeadingStack::default();
         let mut config = DocumentConfig::default_markdown();
+        // Track whether we have any title content since the last test or blank line
+        let mut has_title_since_break = false;
 
         for token in iterator {
             match token {
@@ -97,11 +181,27 @@ impl Parser for MarkdownParser {
                     config = config.with_overrides_from(&parsed_config);
                 }
                 MarkdownToken::Line(_, line) => {
-                    if let Some((_, title)) = extract_title(&line) {
-                        title_paragraph.push(title);
-                        line_parser.set_testcase_title(&title_paragraph.join("\n"));
-                    } else if !title_paragraph.is_empty() {
-                        title_paragraph.clear();
+                    if let Some((_, title, level)) = extract_title(&line) {
+                        if level > 0 {
+                            // This is a markdown heading (# through ######)
+                            heading_stack.set_heading(level, title);
+                        } else {
+                            // This is a paragraph line (level 0)
+                            heading_stack.add_paragraph(title);
+                        }
+                        has_title_since_break = true;
+                        // Update the title in line_parser
+                        let composite_title = heading_stack.build_title(
+                            config.use_composite_test_names(),
+                            config.get_composite_test_name_separator(),
+                        );
+                        line_parser.set_testcase_title(&composite_title);
+                    } else if has_title_since_break {
+                        // Non-title line (blank or other) clears the paragraph accumulator
+                        // but does NOT update the title - the last set title persists
+                        // until new title content is found (matching original behavior)
+                        heading_stack.clear_paragraph();
+                        has_title_since_break = false;
                     }
                 }
                 MarkdownToken::VerbatimCodeBlock {
@@ -136,7 +236,8 @@ impl Parser for MarkdownParser {
                         line_parser.add_testcase_body(line, *index)?;
                     }
                     line_parser.end_testcase(code_lines[code_lines.len() - 1].0)?;
-                    title_paragraph.clear();
+                    heading_stack.clear_after_test();
+                    has_title_since_break = false;
                 }
             }
         }
@@ -315,23 +416,33 @@ impl Iterator for MarkdownIterator<'_> {
     }
 }
 
-fn extract_header(line: &str) -> Option<(String, String)> {
+/// Returns (prefix, title, heading_level) where heading_level is the number of #
+/// characters for headers (1 for #, 2 for ##, etc.) or 0 for non-header titles
+fn extract_header(line: &str) -> Option<(String, String, usize)> {
     HEADER_LINE.captures(line).map(|captures| {
+        let prefix = captures.get(1).unwrap().as_str();
+        let level = prefix.chars().filter(|c| *c == '#').count();
         (
-            captures.get(1).unwrap().as_str().to_string(),
+            prefix.to_string(),
             captures.get(2).unwrap().as_str().to_string(),
+            level,
         )
     })
 }
 
 /// Parses a markdown document line and returns the content of that line if it
-/// is either a paragraph or a header (without the prefixed `#`)
-pub(crate) fn extract_title(line: &str) -> Option<(String, String)> {
+/// is either a paragraph or a header (without the prefixed `#`).
+/// Returns (prefix, title, heading_level) where heading_level is:
+/// - 1-6 for markdown headers (# through ######)
+/// - 0 for paragraph text (non-header titles)
+pub(crate) fn extract_title(line: &str) -> Option<(String, String, usize)> {
     let line = line.trim();
-    if PARAGRAPH_START.is_match(line) {
-        Some(("".into(), line.into()))
+    if let Some(header) = extract_header(line) {
+        Some(header)
+    } else if PARAGRAPH_START.is_match(line) {
+        Some(("".into(), line.into(), 0))
     } else {
-        extract_header(line)
+        None
     }
 }
 
@@ -393,6 +504,7 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
+    use super::HeadingStack;
     use super::MarkdownParser;
     use crate::config::DocumentConfig;
     use crate::config::TestCaseConfig;
@@ -845,5 +957,234 @@ world
     #[test]
     fn test_extract_code_block_start_without_language() {
         assert_eq!(Some(("```", "", "")), extract_code_block_start("```"));
+    }
+
+    #[test]
+    fn test_composite_test_names_disabled_uses_innermost_heading() {
+        // Without composite_test_names, only the innermost heading is used
+        let cram_test = r#"
+# Feature
+
+## Scenario
+
+### Test case
+
+```scrut
+$ echo hello
+hello
+```
+"#;
+        let parser = parser();
+        let (_, testcases) = parser.parse(cram_test).expect("must parse");
+        assert_eq!(1, testcases.len());
+        assert_eq!("Test case", testcases[0].title);
+    }
+
+    #[test]
+    fn test_composite_test_names_enabled() {
+        // With composite_test_names, all heading levels are joined
+        let cram_test = r#"
+---
+composite_test_names: true
+---
+
+# Feature
+
+## Scenario
+
+### Test case
+
+```scrut
+$ echo hello
+hello
+```
+"#;
+        let parser = parser();
+        let (_, testcases) = parser.parse(cram_test).expect("must parse");
+        assert_eq!(1, testcases.len());
+        assert_eq!("Feature > Scenario > Test case", testcases[0].title);
+    }
+
+    #[test]
+    fn test_composite_test_names_custom_separator() {
+        let cram_test = r#"
+---
+composite_test_names: true
+composite_test_name_separator: " / "
+---
+
+# Feature
+
+## Scenario
+
+### Test case
+
+```scrut
+$ echo hello
+hello
+```
+"#;
+        let parser = parser();
+        let (_, testcases) = parser.parse(cram_test).expect("must parse");
+        assert_eq!(1, testcases.len());
+        assert_eq!("Feature / Scenario / Test case", testcases[0].title);
+    }
+
+    #[test]
+    fn test_composite_test_names_deeper_heading_clears_children() {
+        // When a heading at level N is encountered, all deeper headings are cleared
+        let cram_test = r#"
+---
+composite_test_names: true
+---
+
+# Feature
+
+## Scenario 1
+
+### Case 1
+
+```scrut
+$ echo test1
+test1
+```
+
+## Scenario 2
+
+```scrut
+$ echo test2
+test2
+```
+"#;
+        let parser = parser();
+        let (_, testcases) = parser.parse(cram_test).expect("must parse");
+        assert_eq!(2, testcases.len());
+        assert_eq!("Feature > Scenario 1 > Case 1", testcases[0].title);
+        // After "## Scenario 2", the "### Case 1" heading is cleared
+        assert_eq!("Feature > Scenario 2", testcases[1].title);
+    }
+
+    #[test]
+    fn test_composite_test_names_with_paragraph() {
+        // Paragraph text is appended to the composite title
+        let cram_test = r#"
+---
+composite_test_names: true
+---
+
+# Feature
+
+## Scenario
+
+This is the specific test
+
+```scrut
+$ echo hello
+hello
+```
+"#;
+        let parser = parser();
+        let (_, testcases) = parser.parse(cram_test).expect("must parse");
+        assert_eq!(1, testcases.len());
+        assert_eq!(
+            "Feature > Scenario > This is the specific test",
+            testcases[0].title
+        );
+    }
+
+    #[test]
+    fn test_composite_test_names_paragraph_cleared_after_test() {
+        // Paragraph is cleared after a test, but headings persist
+        let cram_test = r#"
+---
+composite_test_names: true
+---
+
+# Feature
+
+## Scenario
+
+Test 1
+
+```scrut
+$ echo test1
+test1
+```
+
+Test 2
+
+```scrut
+$ echo test2
+test2
+```
+"#;
+        let parser = parser();
+        let (_, testcases) = parser.parse(cram_test).expect("must parse");
+        assert_eq!(2, testcases.len());
+        assert_eq!("Feature > Scenario > Test 1", testcases[0].title);
+        assert_eq!("Feature > Scenario > Test 2", testcases[1].title);
+    }
+
+    #[test]
+    fn test_composite_test_names_skipped_heading_levels() {
+        // Handle skipped heading levels (e.g., h1 -> h3)
+        let cram_test = r#"
+---
+composite_test_names: true
+---
+
+# Feature
+
+### Test case
+
+```scrut
+$ echo hello
+hello
+```
+"#;
+        let parser = parser();
+        let (_, testcases) = parser.parse(cram_test).expect("must parse");
+        assert_eq!(1, testcases.len());
+        // Only present headings are included
+        assert_eq!("Feature > Test case", testcases[0].title);
+    }
+
+    #[test]
+    fn test_heading_stack_internals() {
+        // Test the HeadingStack struct directly
+        let mut stack = HeadingStack::default();
+
+        // Add h1
+        stack.set_heading(1, "Feature".to_string());
+        assert_eq!("Feature", stack.build_title(true, " > "));
+        assert_eq!("Feature", stack.build_title(false, " > "));
+
+        // Add h2
+        stack.set_heading(2, "Scenario".to_string());
+        assert_eq!("Feature > Scenario", stack.build_title(true, " > "));
+        assert_eq!("Scenario", stack.build_title(false, " > "));
+
+        // Add h3
+        stack.set_heading(3, "Case".to_string());
+        assert_eq!("Feature > Scenario > Case", stack.build_title(true, " > "));
+        assert_eq!("Case", stack.build_title(false, " > "));
+
+        // Add paragraph
+        stack.add_paragraph("Details".to_string());
+        assert_eq!(
+            "Feature > Scenario > Case > Details",
+            stack.build_title(true, " > ")
+        );
+        assert_eq!("Details", stack.build_title(false, " > "));
+
+        // Clear paragraph
+        stack.clear_paragraph();
+        assert_eq!("Feature > Scenario > Case", stack.build_title(true, " > "));
+        assert_eq!("Case", stack.build_title(false, " > "));
+
+        // Set h2 again (should clear h3)
+        stack.set_heading(2, "New Scenario".to_string());
+        assert_eq!("Feature > New Scenario", stack.build_title(true, " > "));
+        assert_eq!("New Scenario", stack.build_title(false, " > "));
     }
 }

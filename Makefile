@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := selftest
-.PHONY: build selftest cargotest doctest pytest tests update-tests
+.PHONY: build selftest cargotest doctest pytest tests update-tests homebrew-formula
 export SHELL = bash
 
 ifeq ($(SCRUT_BIN),)
@@ -53,3 +53,11 @@ update_tests_cram: $(SCRUT_BIN)
 		$$(find selftest -type f -name "*.t" -not -name "*fail*");
 
 update_tests: update_tests_markdown update_tests_cram
+
+# Generate Homebrew formula with correct SHA256 hashes for a release version.
+# Usage: make homebrew-formula VERSION=0.4.3
+homebrew-formula:
+ifndef VERSION
+	$(error VERSION is required. Usage: make homebrew-formula VERSION=0.4.3)
+endif
+	./scripts/generate-homebrew-formula.sh $(VERSION)

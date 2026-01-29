@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := selftest
-.PHONY: build selftest cargotest doctest pytest tests update-tests
+.PHONY: build selftest cargotest doctest pytest tests update-tests update-homebrew-formula
 export SHELL = bash
 
 ifeq ($(SCRUT_BIN),)
@@ -53,3 +53,6 @@ update_tests_cram: $(SCRUT_BIN)
 		$$(find selftest -type f -name "*.t" -not -name "*fail*");
 
 update_tests: update_tests_markdown update_tests_cram
+
+update-homebrew-formula:
+	./scripts/generate-homebrew-formula $(VERSION)

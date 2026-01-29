@@ -1,0 +1,178 @@
+#!/usr/bin/env bash
+# update-homebrew-formula — Generate Homebrew formula with correct SHA256 hashes
+# Author: scrut maintainers
+# Date: 2025-01-29
+#
+# Usage:
+#   ./scripts/update-homebrew-formula <version>
+#
+# Example:
+#   ./scripts/update-homebrew-formula 0.4.3
+#
+# The script will:
+#   1. Download release tarballs for all supported platforms
+#   2. Compute SHA256 hashes
+#   3. Generate Formula/scrut.rb with the correct values
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+readonly SCRIPT_DIR
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+readonly REPO_ROOT
+readonly FORMULA_PATH="${REPO_ROOT}/Formula/scrut.rb"
+
+# Platform configurations: name -> url_suffix
+declare -A PLATFORMS=(
+  ["linux_arm"]="linux-aarch64"
+  ["linux_intel"]="linux-x86_64"
+  ["macos_arm"]="macos-aarch64"
+  ["macos_intel"]="macos-x86_64"
+)
+
+declare -A HASHES
+
+function usage() {
+  echo "Usage: ${0} <version>"
+  echo ""
+  echo "Generate the Homebrew formula for scrut with correct SHA256 hashes."
+  echo ""
+  echo "Arguments:"
+  echo "  version    The release version (e.g., 0.4.3)"
+  echo ""
+  echo "Example:"
+  echo "  ${0} 0.4.3"
+  exit 1
+}
+
+function compute_sha256() {
+  local file="${1}"
+  local hash
+
+  if command -v sha256sum &>/dev/null; then
+    hash=$(sha256sum "${file}" | cut -d' ' -f1)
+  elif command -v shasum &>/dev/null; then
+    hash=$(shasum -a 256 "${file}" | cut -d' ' -f1)
+  else
+    echo "Error: Neither sha256sum nor shasum found" >&2
+    exit 1
+  fi
+
+  echo "${hash}"
+}
+
+function download_and_hash() {
+  local version="${1}"
+  local temp_directory="${2}"
+  local base_url="https://github.com/facebookincubator/scrut/releases/download/v${version}"
+
+  echo "Fetching SHA256 hashes for scrut v${version}..."
+  echo ""
+
+  local platform
+  for platform in "${!PLATFORMS[@]}"; do
+    local suffix="${PLATFORMS[${platform}]}"
+    local filename="scrut-v${version}-${suffix}.tar.gz"
+    local url="${base_url}/${filename}"
+
+    echo "Downloading ${filename}..."
+
+    if ! curl --fail --silent --show-error --location --output "${temp_directory}/${filename}" "${url}"; then
+      echo "Error: Failed to download ${url}" >&2
+      echo "Make sure the release v${version} exists and includes all platform binaries." >&2
+      exit 1
+    fi
+
+    local hash
+    hash=$(compute_sha256 "${temp_directory}/${filename}")
+    HASHES[${platform}]="${hash}"
+    echo "  SHA256: ${hash}"
+    echo ""
+  done
+}
+
+function generate_formula() {
+  local version="${1}"
+
+  echo "Generating Formula/scrut.rb..."
+
+  mkdir -p "${REPO_ROOT}/Formula"
+
+  cat >"${FORMULA_PATH}" <<FORMULA
+class Scrut < Formula
+  desc "Simple and powerful test framework for CLI applications"
+  homepage "https://facebookincubator.github.io/scrut/"
+  version "${version}"
+  license "MIT"
+
+  on_macos do
+    if Hardware::CPU.arm?
+      url "https://github.com/facebookincubator/scrut/releases/download/v#{version}/scrut-v#{version}-macos-aarch64.tar.gz"
+      sha256 "${HASHES[macos_arm]}"
+    elsif Hardware::CPU.intel?
+      url "https://github.com/facebookincubator/scrut/releases/download/v#{version}/scrut-v#{version}-macos-x86_64.tar.gz"
+      sha256 "${HASHES[macos_intel]}"
+    else
+      odie "scrut: unsupported macOS architecture: #{Hardware::CPU.arch}"
+    end
+  end
+
+  on_linux do
+    if Hardware::CPU.arm?
+      url "https://github.com/facebookincubator/scrut/releases/download/v#{version}/scrut-v#{version}-linux-aarch64.tar.gz"
+      sha256 "${HASHES[linux_arm]}"
+    elsif Hardware::CPU.intel?
+      url "https://github.com/facebookincubator/scrut/releases/download/v#{version}/scrut-v#{version}-linux-x86_64.tar.gz"
+      sha256 "${HASHES[linux_intel]}"
+    else
+      odie "scrut: unsupported Linux architecture: #{Hardware::CPU.arch}"
+    end
+  end
+
+  def install
+    bin.install "scrut"
+
+    generate_completions_from_executable(bin/"scrut", shells: [:bash, :fish, :pwsh, :zsh]) do |shell|
+      env_value = { bash: "bash_source", fish: "fish_source", pwsh: "powershell_source", zsh: "zsh_source" }.fetch(shell)
+      Utils.safe_popen_read({ "_SCRUT_COMPLETE" => env_value }, bin/"scrut")
+    end
+  end
+
+  test do
+    assert_match "scrut #{version}", shell_output("#{bin}/scrut --version")
+  end
+end
+FORMULA
+
+  echo ""
+  echo "Successfully generated ${FORMULA_PATH} for version ${version}"
+  echo ""
+  echo "Hashes:"
+  echo "  Linux ARM (aarch64):  ${HASHES[linux_arm]}"
+  echo "  Linux Intel (x86_64): ${HASHES[linux_intel]}"
+  echo "  macOS ARM (aarch64):  ${HASHES[macos_arm]}"
+  echo "  macOS Intel (x86_64): ${HASHES[macos_intel]}"
+}
+
+function main() {
+  if [[ ${#} -ne 1 ]]; then
+    usage
+  fi
+
+  local version="${1}"
+
+  # Validate version format (basic check)
+  if ! [[ "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo "Error: Version must be in format X.Y.Z (e.g., 0.4.3)" >&2
+    exit 1
+  fi
+
+  local temp_directory
+  temp_directory=$(mktemp -d)
+  trap 'rm -rf "${temp_directory}"' EXIT
+
+  download_and_hash "${version}" "${temp_directory}"
+  generate_formula "${version}"
+}
+
+main "${@}"

@@ -61,9 +61,16 @@ $ cargo build --release --bin scrut
 
 This will create `target/release/scrut` which you now can move to a directory in your `PATH`.
 
-## Install via Homebrew (Mac)
+## Install via Homebrew (Linux, Mac)
 
-Coming soon
+If you have [Homebrew](https://brew.sh/) installed, you can install Scrut with:
+
+```bash title="Terminal"
+$ brew tap facebookincubator/scrut
+$ brew install scrut
+```
+
+This will download the latest pre-built binary for your platform and install it in your Homebrew prefix (typically `/opt/homebrew/bin` on Apple Silicon Macs or `/usr/local/bin` on Intel Macs and Linux). Shell completions for Bash, Fish, PowerShell, and Zsh are installed automatically. For Elvish, you'll have to install completions manually; see [the instructions below](#shell-completions).
 
 ## Verify
 
@@ -75,3 +82,65 @@ scrut v0.X.Y
 ```
 
 (You will see the latest version here)
+
+## Shell Completions
+
+Scrut can generate shell completion scripts for tab-completion of commands and options.
+
+:::note
+If you installed via Homebrew, completions are already installed automatically.
+:::
+
+Generate and install completions for your shell using the `completions` subcommand:
+
+### Bash
+
+```bash title="Terminal"
+$ scrut completions bash > ~/.local/share/bash-completion/completions/scrut
+```
+
+Or, if using an older setup:
+
+```bash title="Terminal"
+$ scrut completions bash > ~/.bash_completion.d/scrut
+```
+
+### Zsh
+
+```bash title="Terminal"
+$ scrut completions zsh > ~/.zfunc/_scrut
+```
+
+Then ensure your `~/.zshrc` includes:
+
+```bash
+fpath=(~/.zfunc $fpath)
+autoload -Uz compinit && compinit
+```
+
+### Fish
+
+```bash title="Terminal"
+$ scrut completions fish > ~/.config/fish/completions/scrut.fish
+```
+
+### PowerShell
+
+```powershell title="PowerShell"
+$ scrut completions powershell > scrut.ps1
+$ . ./scrut.ps1
+```
+
+To load completions automatically, add the above to your PowerShell profile.
+
+### Elvish
+
+```elvish title="Elvish"
+$ scrut completions elvish > ~/.config/elvish/lib/scrut.elv
+```
+
+Then add to your `~/.config/elvish/rc.elv`:
+
+```elvish
+use scrut
+```

@@ -64,6 +64,26 @@ echo ""
 TMPDIR=$(mktemp -d)
 trap 'rm -rf "$TMPDIR"' EXIT
 
+# Source tarball URL (for building from source)
+SOURCE_URL="https://github.com/facebookincubator/scrut/archive/refs/tags/v${VERSION}.tar.gz"
+echo "Downloading source tarball..."
+if ! curl -fsSL -o "$TMPDIR/source.tar.gz" "$SOURCE_URL"; then
+    echo "Error: Failed to download source tarball from $SOURCE_URL"
+    exit 1
+fi
+
+# Compute source tarball hash
+if command -v sha256sum &> /dev/null; then
+    SOURCE_HASH=$(sha256sum "$TMPDIR/source.tar.gz" | cut -d' ' -f1)
+elif command -v shasum &> /dev/null; then
+    SOURCE_HASH=$(shasum -a 256 "$TMPDIR/source.tar.gz" | cut -d' ' -f1)
+else
+    echo "Error: Neither sha256sum nor shasum found"
+    exit 1
+fi
+echo "  Source SHA256: $SOURCE_HASH"
+echo ""
+
 for platform in "${!PLATFORMS[@]}"; do
     suffix="${PLATFORMS[$platform]}"
     filename="scrut-v${VERSION}-${suffix}.tar.gz"
@@ -104,32 +124,55 @@ class Scrut < Formula
   version "${VERSION}"
   license "MIT"
 
+  # Source tarball for building from source (used with --build-from-source)
+  url "https://github.com/facebookincubator/scrut/archive/refs/tags/v#{version}.tar.gz"
+  sha256 "${SOURCE_HASH}"
+
+  # Pre-built binaries (default installation)
   on_macos do
     if Hardware::CPU.arm?
-      url "https://github.com/facebookincubator/scrut/releases/download/v#{version}/scrut-v#{version}-macos-aarch64.tar.gz"
-      sha256 "${HASHES[macos_arm]}"
+      resource "binary" do
+        url "https://github.com/facebookincubator/scrut/releases/download/v#{version}/scrut-v#{version}-macos-aarch64.tar.gz"
+        sha256 "${HASHES[macos_arm]}"
+      end
     elsif Hardware::CPU.intel?
-      url "https://github.com/facebookincubator/scrut/releases/download/v#{version}/scrut-v#{version}-macos-x86_64.tar.gz"
-      sha256 "${HASHES[macos_intel]}"
-    else
-      odie "scrut: unsupported macOS architecture: #{Hardware::CPU.arch}"
+      resource "binary" do
+        url "https://github.com/facebookincubator/scrut/releases/download/v#{version}/scrut-v#{version}-macos-x86_64.tar.gz"
+        sha256 "${HASHES[macos_intel]}"
+      end
     end
   end
 
   on_linux do
     if Hardware::CPU.arm?
-      url "https://github.com/facebookincubator/scrut/releases/download/v#{version}/scrut-v#{version}-linux-aarch64.tar.gz"
-      sha256 "${HASHES[linux_arm]}"
+      resource "binary" do
+        url "https://github.com/facebookincubator/scrut/releases/download/v#{version}/scrut-v#{version}-linux-aarch64.tar.gz"
+        sha256 "${HASHES[linux_arm]}"
+      end
     elsif Hardware::CPU.intel?
-      url "https://github.com/facebookincubator/scrut/releases/download/v#{version}/scrut-v#{version}-linux-x86_64.tar.gz"
-      sha256 "${HASHES[linux_intel]}"
-    else
-      odie "scrut: unsupported Linux architecture: #{Hardware::CPU.arch}"
+      resource "binary" do
+        url "https://github.com/facebookincubator/scrut/releases/download/v#{version}/scrut-v#{version}-linux-x86_64.tar.gz"
+        sha256 "${HASHES[linux_intel]}"
+      end
     end
   end
 
+  # Build from latest git HEAD
+  head "https://github.com/facebookincubator/scrut.git", branch: "main"
+
+  # Build dependencies (only used when building from source)
+  depends_on "rust" => :build
+
   def install
-    bin.install "scrut"
+    if build.head? || build.build_from_source?
+      # Build from source using Cargo
+      system "cargo", "install", *std_cargo_args
+    else
+      # Install pre-built binary
+      resource("binary").stage do
+        bin.install "scrut"
+      end
+    end
 
     generate_completions_from_executable(bin/"scrut", shells: [:bash, :fish, :pwsh, :zsh]) do |shell|
       env_value = { bash: "bash_source", fish: "fish_source", pwsh: "powershell_source", zsh: "zsh_source" }.fetch(shell)
@@ -147,7 +190,8 @@ echo ""
 echo "Successfully generated $FORMULA_PATH for version ${VERSION}"
 echo ""
 echo "Hashes:"
-echo "  macOS ARM (aarch64): ${HASHES[macos_arm]}"
+echo "  Source tarball:       ${SOURCE_HASH}"
+echo "  macOS ARM (aarch64):  ${HASHES[macos_arm]}"
 echo "  macOS Intel (x86_64): ${HASHES[macos_intel]}"
 echo "  Linux ARM (aarch64):  ${HASHES[linux_arm]}"
 echo "  Linux Intel (x86_64): ${HASHES[linux_intel]}"

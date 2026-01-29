@@ -72,6 +72,26 @@ $ brew install scrut
 
 This will download the latest pre-built binary for your platform and install it in your Homebrew prefix (typically `/opt/homebrew/bin` on Apple Silicon Macs or `/usr/local/bin` on Intel Macs and Linux). Shell completions for Bash, Fish, PowerShell, and Zsh are installed automatically. For Elvish, you'll have to install completions manually; see [the instructions below](#shell-completions).
 
+### Building from Source with Homebrew
+
+If you prefer to build Scrut from source instead of using pre-built binaries, you can use the `--build-from-source` flag:
+
+```bash title="Terminal"
+$ brew tap facebookincubator/scrut
+$ brew install --build-from-source scrut
+```
+
+This will download the source code and compile it using Rust/Cargo. This option requires the Rust toolchain, which Homebrew will install automatically as a build dependency.
+
+You can also install the latest development version directly from the git repository using the `--HEAD` flag:
+
+```bash title="Terminal"
+$ brew tap facebookincubator/scrut
+$ brew install --HEAD scrut
+```
+
+This builds from the latest commit on the main branch, which may include features not yet in a release.
+
 ## Verify
 
 Now that you have downloaded the binary and stored it in your `PATH` verify that you can execute the following before proceeding:

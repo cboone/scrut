@@ -1,0 +1,77 @@
+# Update Homebrew Formula
+#
+# This workflow generates the Homebrew formula with correct SHA256 hashes
+# after release binaries are uploaded to GitHub Releases.
+#
+# Trigger options:
+#   1. Automatic: Runs after "Build and Release Binaries" workflow completes successfully
+#   2. Manual: Use workflow_dispatch with a version number
+#
+# The workflow creates a PR rather than committing directly to avoid
+# conflicts with internal sync processes.
+
+name: Update Homebrew Formula
+
+on:
+  # Trigger after release-binaries workflow completes
+  workflow_run:
+    workflows: ["Build and Release Binaries"]
+    types: [completed]
+
+  # Allow manual trigger
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to generate formula for (e.g., 0.4.3)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update-formula:
+    runs-on: ubuntu-latest
+    # Only run if the triggering workflow succeeded (or if manually triggered)
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Get Version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ inputs.version }}"
+          else
+            # Extract version from the tag that triggered the release workflow
+            # The head_branch contains the tag name (e.g., "v0.4.3")
+            TAG="${{ github.event.workflow_run.head_branch }}"
+            VERSION="${TAG#v}"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Generating formula for version: $VERSION"
+
+      - name: Generate Homebrew Formula
+        run: |
+          chmod +x ./scripts/generate-homebrew-formula.sh
+          ./scripts/generate-homebrew-formula.sh "${{ steps.version.outputs.version }}"
+
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v6
+        with:
+          commit-message: "Update Homebrew formula to v${{ steps.version.outputs.version }}"
+          title: "Update Homebrew formula to v${{ steps.version.outputs.version }}"
+          body: |
+            Automatically generated Homebrew formula update for version ${{ steps.version.outputs.version }}.
+
+            This PR was created by the `update-homebrew-formula` workflow after the release binaries were published.
+
+            **Checklist:**
+            - [ ] Verify the SHA256 hashes are correct
+            - [ ] Merge when ready
+          branch: update-homebrew-formula-${{ steps.version.outputs.version }}
+          base: main
+          delete-branch: true
